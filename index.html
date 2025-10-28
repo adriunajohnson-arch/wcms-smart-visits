@@ -1,70 +1,9 @@
-<!-- Firebase SDK initialization -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-  import { 
-    getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs, getDoc
-  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-
-  // Your web app's Firebase configuration
-  const firebaseConfig = {
-    apiKey: "AIzaSyCR0mIxFHMoeZZTzkLyXw8jaawWczUA2qo",
-    authDomain: "wcms-smart-visits.firebaseapp.com",
-    projectId: "wcms-smart-visits",
-    storageBucket: "wcms-smart-visits.firebasestorage.app",
-    messagingSenderId: "183888325405",
-    appId: "1:183888325405:web:e8dffd77973e93ecd6cff4"
-  };
-
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const auth = getAuth(app);
-  const provider = new GoogleAuthProvider();
-
-  // Expose for non-module scripts (UI script below)
-  window._fb = { db, auth, provider, fns: { collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs, getDoc } };
-
-  // Simple auth UI buttons in header
-  const header = document.querySelector('header');
-  const signInBtn = document.createElement('button');
-  signInBtn.textContent = 'Sign in with Google';
-  signInBtn.id = 'signInBtn';
-  signInBtn.className = 'px-3 py-2 text-sm rounded-md bg-blue-600 text-white';
-  header.appendChild(signInBtn);
-
-  const signOutBtn = document.createElement('button');
-  signOutBtn.textContent = 'Sign out';
-  signOutBtn.id = 'signOutBtn';
-  signOutBtn.className = 'hidden px-3 py-2 text-sm rounded-md bg-rose-600 text-white';
-  header.appendChild(signOutBtn);
-
-  signInBtn.addEventListener('click', async ()=>{
-    try { await signInWithPopup(auth, provider); } catch(e){ console.error(e); }
-  });
-  signOutBtn.addEventListener('click', ()=> signOut(auth));
-
-  onAuthStateChanged(auth, user=>{
-    if(user){
-      signInBtn.classList.add('hidden');
-      signOutBtn.classList.remove('hidden');
-      document.body.classList.remove('opacity-50','pointer-events-none');
-      console.log('Signed in as', user.email);
-      window.dispatchEvent(new CustomEvent('fb:signed-in', { detail: { user } }));
-    } else {
-      signOutBtn.classList.add('hidden');
-      signInBtn.classList.remove('hidden');
-      console.log('Signed out');
-      window.dispatchEvent(new CustomEvent('fb:signed-out'));
-    }
-  });
-</script>
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Daily Classroom Visit Tracker — Standalone (Local)</title>
+  <title>WCMS — Daily Classroom Visit Tracker</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     html,body{height:100%}
@@ -77,12 +16,16 @@
     <header class="flex items-center justify-between mb-4">
       <div>
         <h1 class="text-2xl md:text-3xl font-bold">Daily Classroom Visit Tracker</h1>
-        <p class="text-sm text-slate-500">Local-only preview • sleek & compact</p>
+        <p class="text-sm text-slate-500">Sleek • Compact • Firebase-backed</p>
       </div>
       <div class="flex items-center gap-2">
         <button id="exportCsvBtn" class="px-3 py-2 text-sm rounded-md bg-emerald-600 text-white">Export CSV</button>
         <input id="csvInput" type="file" accept=".csv,.txt" class="hidden" />
         <button id="importCsvBtn" class="px-3 py-2 text-sm rounded-md bg-violet-600 text-white">Import CSV</button>
+
+        <!-- Auth buttons -->
+        <button id="signInBtn" class="px-3 py-2 text-sm rounded-md bg-blue-600 text-white">Sign in with Google</button>
+        <button id="signOutBtn" class="hidden px-3 py-2 text-sm rounded-md bg-rose-600 text-white">Sign out</button>
       </div>
     </header>
 
@@ -135,6 +78,7 @@
         </div>
         <div class="flex items-end gap-2">
           <button id="addBtn" class="w-full md:w-auto px-4 py-2 rounded-md bg-blue-600 text-white">Add</button>
+          <button id="preloadBtn" class="w-full md:w-auto px-4 py-2 rounded-md border">Preload WCMS Teachers</button>
           <span class="ml-auto text-sm text-slate-600">Total: <strong id="count">0</strong></span>
         </div>
       </div>
@@ -145,7 +89,7 @@
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100">
         <div class="flex items-center gap-2">
           <h2 class="text-base md:text-lg font-semibold">Teachers</h2>
-          <span id="statusBadge" class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">preloaded</span>
+          <span id="statusBadge" class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">ready</span>
         </div>
         <div class="flex items-center gap-2 text-sm">
           <input id="search" class="px-3 py-1.5 rounded-md border border-slate-200 bg-white" placeholder="Search" />
@@ -193,263 +137,378 @@
     </section>
   </main>
 
-  <script>
-  // ==== Firebase-backed UI logic (Firestore) ====
-  const { db, auth, fns } = window._fb || {};
-  const { collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs, getDoc } = (window._fb||{}).fns || {};
+  <!-- Firebase SDK (module) -->
+  <script type="module">
+    // --- Firebase core ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { 
+      getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs, getDoc
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-  // DOM helpers
-  const $ = (id)=>document.getElementById(id);
-  const list = $('list');
-  const count = $('count');
-  const search = $('search');
-  const statusBadge = $('statusBadge');
-  const scheduleList = $('scheduleList');
-  const statCompleted = $('statCompleted');
-  const statScheduled = $('statScheduled');
-  const statWeek = $('statWeek');
-  const statAvg = $('statAvg');
-  const statMissed = $('statMissed');
+    // --- Your Firebase config (already created in your project) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCR0mIxFHMoeZZTzkLyXw8jaawWczUA2qo",
+      authDomain: "wcms-smart-visits.firebaseapp.com",
+      projectId: "wcms-smart-visits",
+      storageBucket: "wcms-smart-visits.firebasestorage.app",
+      messagingSenderId: "183888325405",
+      appId: "1:183888325405:web:e8dffd77973e93ecd6cff4"
+    };
 
-  // State
-  let teachers = [];
-  let filtered = [];
-  let visitsAll = [];
-  let visitsToday = [];
-  let visitsWeek = [];
-  let scheduleDoc = null;
-  let currentRating = 0;
+    // --- Initialize ---
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
 
-  // Periods
-  const PERIODS = [
-    {label:'1st', time:'08:20-09:15'},
-    {label:'2nd', time:'09:15-10:10'},
-    {label:'3rd', time:'10:10-11:05'},
-    {label:'5th', time:'12:40-13:35'},
-    {label:'6th', time:'13:35-14:30'},
-    {label:'7th', time:'14:30-15:30'},
-  ];
-  const todayStr = ()=> new Date().toISOString().slice(0,10);
-  function weekStartStr(){ const d = new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); }
+    // --- DOM refs ---
+    const $ = (id)=>document.getElementById(id);
+    const list = $('list');
+    const count = $('count');
+    const search = $('search');
+    const statusBadge = $('statusBadge');
+    const scheduleList = $('scheduleList');
+    const statCompleted = $('statCompleted');
+    const statScheduled = $('statScheduled');
+    const statWeek = $('statWeek');
+    const statAvg = $('statAvg');
+    const statMissed = $('statMissed');
+    const signInBtn = $('signInBtn');
+    const signOutBtn = $('signOutBtn');
 
-  // Render helpers
-  function render(){
-    count.textContent = teachers.length;
-    const q = (search.value||'').toLowerCase();
-    filtered = teachers.filter(t=> t.name.toLowerCase().includes(q) || (t.subject||'').toLowerCase().includes(q));
-    if(!filtered.length){ list.innerHTML = '<div class="p-6 text-center text-slate-500">No teachers found</div>'; return; }
-    list.innerHTML = filtered.map(t=>`
-      <div class="row flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <div class="min-w-0">
-          <div class="truncate font-medium">${t.name}</div>
-          <div class="truncate text-sm text-slate-500">${t.subject||''}</div>
+    // --- State ---
+    let teachers = [];
+    let filtered = [];
+    let visitsAll = [];
+    let visitsToday = [];
+    let visitsWeek = [];
+    let scheduleDoc = null;
+    let currentRating = 0;
+
+    // --- Periods (skip lunch/4th) ---
+    const PERIODS = [
+      {label:'1st', time:'08:20-09:15'},
+      {label:'2nd', time:'09:15-10:10'},
+      {label:'3rd', time:'10:10-11:05'},
+      {label:'5th', time:'12:40-13:35'},
+      {label:'6th', time:'13:35-14:30'},
+      {label:'7th', time:'14:30-15:30'},
+    ];
+    const todayStr = ()=> new Date().toISOString().slice(0,10);
+    function weekStartStr(){ const d = new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); }
+
+    // --- Auth UI ---
+    signInBtn.addEventListener('click', async ()=>{
+      try { await signInWithPopup(auth, provider); } catch(e){ alert('Sign-in failed'); console.error(e); }
+    });
+    signOutBtn.addEventListener('click', ()=> signOut(auth));
+
+    onAuthStateChanged(auth, user=>{
+      if(user){
+        signInBtn.classList.add('hidden');
+        signOutBtn.classList.remove('hidden');
+        bindRealtime(); // start listeners after sign-in
+      } else {
+        signOutBtn.classList.add('hidden');
+        signInBtn.classList.remove('hidden');
+        // Clear UI
+        teachers = []; visitsAll = []; visitsToday = []; visitsWeek = []; scheduleDoc = null;
+        render(); renderVisitTeacher(); renderSchedule(); updateStats();
+      }
+    });
+
+    // --- Realtime bindings ---
+    function bindRealtime(){
+      // Teachers
+      onSnapshot(query(collection(db,'teachers'), orderBy('name')), snap=>{
+        teachers = snap.docs.map(d=>({ id: d.id, ...(d.data()) }));
+        render(); renderVisitTeacher();
+      });
+
+      // Visits (all)
+      onSnapshot(collection(db,'visits'), snap=>{
+        visitsAll = snap.docs.map(d=>d.data());
+        updateStats(); renderSchedule();
+      });
+
+      // Today
+      onSnapshot(query(collection(db,'visits'), where('date','==', todayStr())), snap=>{
+        visitsToday = snap.docs.map(d=>d.data());
+        updateStats(); renderSchedule();
+      });
+
+      // Week
+      onSnapshot(query(collection(db,'visits'), where('date','>=', weekStartStr())), snap=>{
+        visitsWeek = snap.docs.map(d=>d.data());
+        updateStats();
+      });
+
+      // Today's schedule
+      onSnapshot(doc(db,'schedules', todayStr()), snap=>{
+        scheduleDoc = snap.exists() ? snap.data() : { date: todayStr(), items: [] };
+        renderSchedule(); updateStats();
+      });
+    }
+
+    // --- Render helpers ---
+    function render(){
+      count.textContent = teachers.length;
+      const q = (search.value||'').toLowerCase();
+      filtered = teachers.filter(t=> t.name.toLowerCase().includes(q) || (t.subject||'').toLowerCase().includes(q));
+      if(!filtered.length){ list.innerHTML = '<div class="p-6 text-center text-slate-500">No teachers found</div>'; return; }
+      list.innerHTML = filtered.map(t=>`
+        <div class="row flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <div class="min-w-0">
+            <div class="truncate font-medium">${escapeHtml(t.name)}</div>
+            <div class="truncate text-sm text-slate-500">${escapeHtml(t.subject||'')}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-2 py-1.5 text-xs rounded-md border hover:bg-slate-50" onclick="window._editTeacher('${b64(t.id)}')">Edit</button>
+            <button class="px-2 py-1.5 text-xs rounded-md bg-rose-600 text-white" onclick="window._removeTeacher('${b64(t.id)}','${b64(t.name)}')">Remove</button>
+          </div>
         </div>
-        <div class="flex items-center gap-2">
-          <button class="px-2 py-1.5 text-xs rounded-md border hover:bg-slate-50" onclick="window._editTeacher('${b64(t.id)}')">Edit</button>
-          <button class="px-2 py-1.5 text-xs rounded-md bg-rose-600 text-white" onclick="window._removeTeacher('${b64(t.id)}','${b64(t.name)}')">Remove</button>
-        </div>
-      </div>
-    `).join('');
-  }
-  function renderVisitTeacher(){
-    const sel = $('visitTeacher'); if(!sel) return; const val = sel.value;
-    sel.innerHTML = '<option value="">Select teacher</option>' + teachers.map(t=>`<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
-    sel.value = val;
-  }
-  function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
-  function b64(s){return btoa(unescape(encodeURIComponent(s)))}
-  function ub64(s){return decodeURIComponent(escape(atob(s)))}
+      `).join('');
+    }
+    function renderVisitTeacher(){
+      const sel = $('visitTeacher'); if(!sel) return; const val = sel.value;
+      sel.innerHTML = '<option value="">Select teacher</option>' + teachers.map(t=>`<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+      sel.value = val;
+    }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+    function b64(s){return btoa(unescape(encodeURIComponent(s)))}
+    function ub64(s){return decodeURIComponent(escape(atob(s)))}
 
-  // Firestore listeners after sign-in
-  async function bindRealtime(){
-    // Teachers
-    onSnapshot(query(collection(db,'teachers'), orderBy('name')), snap=>{
-      teachers = snap.docs.map(d=>({ id: d.id, ...(d.data()) }));
-      render(); renderVisitTeacher();
-    });
+    // --- CRUD: Teachers ---
+    window._removeTeacher = async (encId, encName)=>{
+      const id = ub64(encId); const name = ub64(encName);
+      if(!confirm(`Remove ${name}?`)) return;
+      await deleteDoc(doc(db,'teachers', id));
+    };
 
-    // Visits (all for avg)
-    onSnapshot(collection(db,'visits'), snap=>{
-      visitsAll = snap.docs.map(d=>d.data());
-      updateStats(); renderSchedule();
-    });
+    window._editTeacher = async (encId)=>{
+      const id = ub64(encId);
+      const tDoc = await getDoc(doc(db,'teachers', id)); if(!tDoc.exists()) return;
+      const t = tDoc.data();
+      const newName = prompt('Edit name', t.name) || t.name;
+      const newSubj = prompt('Edit subject', t.subject||'') || t.subject;
+      await updateDoc(doc(db,'teachers', id), { name: newName.trim(), subject: newSubj.trim(), updatedAt: serverTimestamp() });
+    };
 
-    // Visits today
-    onSnapshot(query(collection(db,'visits'), where('date','==', todayStr())), snap=>{
-      visitsToday = snap.docs.map(d=>d.data());
-      updateStats(); renderSchedule();
-    });
-
-    // Visits week
-    onSnapshot(query(collection(db,'visits'), where('date','>=', weekStartStr())), snap=>{
-      visitsWeek = snap.docs.map(d=>d.data());
-      updateStats();
-    });
-
-    // Today's schedule doc
-    onSnapshot(doc(db,'schedules', todayStr()), snap=>{
-      scheduleDoc = snap.exists() ? snap.data() : { date: todayStr(), items: [] };
-      renderSchedule(); updateStats();
-    });
-  }
-
-  // CRUD: Teachers
-  window._removeTeacher = async (encId, encName)=>{
-    const id = ub64(encId); const name = ub64(encName);
-    if(!confirm(`Remove ${name}?`)) return;
-    await deleteDoc(doc(db,'teachers', id));
-  };
-
-  window._editTeacher = async (encId)=>{
-    const id = ub64(encId);
-    const tDoc = await getDoc(doc(db,'teachers', id)); if(!tDoc.exists()) return;
-    const t = tDoc.data();
-    const newName = prompt('Edit name', t.name) || t.name;
-    const newSubj = prompt('Edit subject', t.subject||'') || t.subject;
-    await updateDoc(doc(db,'teachers', id), { name: newName.trim(), subject: newSubj.trim(), updatedAt: serverTimestamp() });
-  };
-
-  $('addBtn').addEventListener('click', async ()=>{
-    const name = ($('newName').value||'').trim();
-    const subject = ($('newSubject').value||'').trim();
-    if(!name || !subject){ return alert('Please enter name and subject'); }
-    // prevent duplicates (client-side)
-    if(teachers.some(t=>t.name.toLowerCase()===name.toLowerCase())){ return alert('That teacher already exists'); }
-    await addDoc(collection(db,'teachers'), { name, subject, active: true, createdAt: serverTimestamp() });
-    $('newName').value=''; $('newSubject').value='';
-    statusBadge.textContent = 'updated';
-    statusBadge.className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700';
-    setTimeout(()=>{statusBadge.textContent='live';statusBadge.className='text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600'},1200);
-  });
-
-  // Import CSV → Firestore
-  $('importCsvBtn').addEventListener('click', ()=> $('csvInput').click());
-  $('csvInput').addEventListener('change', async (e)=>{
-    const file = e.target.files[0]; if(!file) return; const text = await file.text();
-    const lines = text.split(/
-?
-/).map(l=>l.trim()).filter(Boolean);
-    let added=0, skipped=0;
-    for(const line of lines){
-      const [nameRaw, subjectRaw] = line.split(',');
-      const name = (nameRaw||'').trim();
-      const subject = (subjectRaw||'').trim();
-      if(!name || !subject){ skipped++; continue; }
-      if(teachers.some(t=>t.name.toLowerCase()===name.toLowerCase())){ skipped++; continue; }
+    $('addBtn').addEventListener('click', async ()=>{
+      const name = ($('newName').value||'').trim();
+      const subject = ($('newSubject').value||'').trim();
+      if(!name || !subject){ return alert('Please enter name and subject'); }
+      if(teachers.some(t=>t.name.toLowerCase()===name.toLowerCase())){ return alert('That teacher already exists'); }
       await addDoc(collection(db,'teachers'), { name, subject, active: true, createdAt: serverTimestamp() });
-      added++;
-    }
-    alert(`Import complete: ${added} added${skipped?`, ${skipped} skipped`:''}`);
-    e.target.value='';
-  });
-
-  // Export CSV from current teacher list
-  $('exportCsvBtn').addEventListener('click', ()=>{
-    const rows = teachers.map(t=>`${escapeCsv(t.name)},${escapeCsv(t.subject||'')}`);
-    const csv = ['Name,Subject', ...rows].join('
-');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'wcms_teachers.csv'; a.click(); URL.revokeObjectURL(url);
-  });
-  function escapeCsv(s){ return (/,|"|
-/.test(s)) ? '"'+s.replaceAll('"','""')+'"' : s; }
-
-  // Clear all teachers (bulk delete)
-  $('clearAllBtn').addEventListener('click', async ()=>{
-    if(!confirm('Clear ALL teachers from Firestore?')) return;
-    const snap = await getDocs(collection(db,'teachers'));
-    const batch = [];
-    for(const d of snap.docs){ batch.push(deleteDoc(doc(db,'teachers', d.id))); }
-    await Promise.all(batch);
-  });
-
-  // Schedule (Firestore doc: schedules/{YYYY-MM-DD})
-  function getLastVisitedMap(){ const map = new Map(); for(const v of visitsAll){ map.set(v.teacher, v.date); } return map; }
-  async function generateSchedule(){
-    if(!teachers.length){ alert('Add teachers first'); return; }
-    const today = todayStr();
-    const lastMap = getLastVisitedMap();
-    const sorted = [...teachers].sort((a,b)=>{
-      const ad = lastMap.get(a.name) ? new Date(lastMap.get(a.name)).getTime() : 0;
-      const bd = lastMap.get(b.name) ? new Date(lastMap.get(b.name)).getTime() : 0;
-      return ad - bd; // least recently visited first
+      $('newName').value=''; $('newSubject').value='';
+      flashStatus('updated','emerald');
     });
-    const chosen = [];
-    const periods = PERIODS.slice();
-    while(chosen.length < Math.min(5, sorted.length, periods.length)){
-      const t = sorted.shift(); if(!t) break; const p = periods.shift();
-      chosen.push({ id: crypto.randomUUID(), teacher: t.name, subject: t.subject, period: p.label, time: p.time, status:'scheduled' });
+
+    // CSV Import/Export
+    $('importCsvBtn').addEventListener('click', ()=> $('csvInput').click());
+    $('csvInput').addEventListener('change', async (e)=>{
+      const file = e.target.files[0]; if(!file) return; const text = await file.text();
+      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      let added=0, skipped=0;
+      for(const line of lines){
+        const [nameRaw, subjectRaw] = line.split(',');
+        const name = (nameRaw||'').trim();
+        const subject = (subjectRaw||'').trim();
+        if(!name || !subject){ skipped++; continue; }
+        if(teachers.some(t=>t.name.toLowerCase()===name.toLowerCase())){ skipped++; continue; }
+        await addDoc(collection(db,'teachers'), { name, subject, active: true, createdAt: serverTimestamp() });
+        added++;
+      }
+      alert(`Import complete: ${added} added${skipped?`, ${skipped} skipped`:''}`);
+      e.target.value='';
+    });
+
+    $('exportCsvBtn').addEventListener('click', ()=>{
+      const rows = teachers.map(t=>`${escapeCsv(t.name)},${escapeCsv(t.subject||'')}`);
+      const csv = ['Name,Subject', ...rows].join('\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'wcms_teachers.csv'; a.click(); URL.revokeObjectURL(url);
+    });
+    function escapeCsv(s){ return (/,|"|\n/.test(s)) ? '"'+s.replaceAll('"','""')+'"' : s; }
+
+    $('clearAllBtn').addEventListener('click', async ()=>{
+      if(!confirm('Clear ALL teachers from Firestore?')) return;
+      const snap = await getDocs(collection(db,'teachers'));
+      await Promise.all(snap.docs.map(d=> deleteDoc(doc(db,'teachers', d.id))));
+    });
+
+    // --- WCMS Preload (once) ---
+    $('preloadBtn').addEventListener('click', async ()=>{
+      if(!confirm('Preload WCMS teacher list? (Skips names that already exist)')) return;
+      const preload = [
+        ["Adams, Diana","Special Ed ELA Co-Teacher"],
+        ["Altman, Virginia","Family and Consumer Science 6-8"],
+        ["Austin, Catrina","Special Ed - ELA"],
+        ["Barfield, Jesse","Grade 6 - 8 Health & Physical Education"],
+        ["Bell, Joseph","Grade 7 Math"],
+        ["Blackburn, Bailey","Grade 8 Science, Gifted"],
+        ["Boone, Liller","Grade 8 Science"],
+        ["Bridges, Ricky","Grade 8 ELA, Gifted"],
+        ["Corder, Lori","Grade 6 Social Studies"],
+        ["Dial, Staci","SpEd Co-Teacher"],
+        ["Eunice, Mollie","Grade 6 Science"],
+        ["Fulford, Anne","Special Ed - Math"],
+        ["Grantham, Jo","Speech & Lang Disorders"],
+        ["Hay, Hollie","Special Ed - Math"],
+        ["Henderson, Cherry","Grade 6 - 8 Agriculture"],
+        ["Henderson, Christiane","Grade 7 Math, Gifted"],
+        ["Punchard, Cassie","Special Ed Math Co-Teacher"],
+        ["Hinely, William","Special Ed - Science / Math"],
+        ["Jaime, Emily","Business Computer Information System, Grade 6-8"],
+        ["Jeffers, Savannah","Grade 8 Social Studies"],
+        ["Jones, Priscilla","Grade 8 Social Studies"],
+        ["King, Sarah Beth","Grade 6 - 8 Health & Physical Education"],
+        ["King, Teresa","Special Ed - ELA"],
+        ["Knox, Caryn","Grade 6 Math & SS Gifted"],
+        ["Lee, Erin","Special Ed - ELA / LAB"],
+        ["Lee, Melissa","Grade 7 Science/S Studies, Gifted"],
+        ["Level, Arlesia","Grade 7 Social Studies"],
+        ["Long, Rebekah","Grade 6 ELA"],
+        ["Mancil, Aimee","Media Specialist"],
+        ["Matthews, Amber","Special Education Teacher, Self-Contained"],
+        ["Meadows, Taylor","Grade 6 Social Studies"],
+        ["Meeks, Rebecca","Grade 7 ELA Gifted"],
+        ["Obradovic, Mirijana","ESOL"],
+        ["Ogletree, Asti","Grade 8 ELA"],
+        ["Parten, Stormy","Special Ed - ELA"],
+        ["Paschall, Angelo","RTI Interventionist*"],
+        ["Pennamon, Dana","Grade 7 ELA"],
+        ["Pierre, Cierra","Special Ed ELA Co-Teacher"],
+        ["Pittman, Kristen","Grade 7 ELA"],
+        ["Price, Jimmy","Grade 7 Social Studies"],
+        ["Price, Millie","Grade 8 Social Studies, Gifted"],
+        ["Ratliff, Duncan","6th Grade Band"],
+        ["Register, Christina","Grade 8 Math, Gifted"],
+        ["Rewis, Brooke","Grade 6 Math"],
+        ["Ricker, Amelia","Grade 6 ELA"],
+        ["Roberts, Anna","Grade 6 - 8 Art"],
+        ["Rowe/Hickox","RTI Interventionist*"],
+        ["Saenz, Elizabeth","Grade 8 Science"],
+        ["Smith, Brittany (New Hire)","Grade 7 Science"],
+        ["Smith, Quida","Grade 6 Special Ed - Math"],
+        ["Starling, Chad","Athletic Director, Grade 6 - 8 Physical Ed."],
+        ["Stephens, Kristin","Grade 8 Math"],
+        ["Tatum, Marah","Grade 6 Science"],
+        ["Thrift, Misty","Grade 6 ELA & SS Gifted"],
+        ["Treadwell, Dee","Grade 6  Math"],
+        ["Villiers, Katy","Grade 8 Math"],
+        ["Walker, Gabrielle","Grades 6-8 Chorus"],
+        ["Watson, Michelle","RTI Interventionist*"],
+        ["Weeks, Michelle","Grade 6 Sci/S Studies, Gifted"],
+        ["Whalley, Nancy","Special Ed Teacher, Self-Contained"],
+        ["White, Jimmy","Grade 7 Math"],
+        ["White, Kiersten","Grade 7 Science"],
+        ["Williams, Zach","Grade 6-8 Band"],
+        ["Yeomans, Donna","Grade 6 - 8 Health Care Science"],
+        ["Pond, Elizabeth (ESS)","8th Grade ELA"]
+      ];
+      let added = 0, skipped = 0;
+      const existing = new Set(teachers.map(t=> t.name.toLowerCase()));
+      for(const [name, subject] of preload.sort((a,b)=> a[0].localeCompare(b[0]))){
+        if(existing.has(name.toLowerCase())){ skipped++; continue; }
+        await addDoc(collection(db,'teachers'), { name, subject, active:true, createdAt: serverTimestamp() });
+        added++;
+      }
+      alert(`Preload complete: ${added} added${skipped?`, ${skipped} skipped`:''}`);
+      flashStatus('preloaded','violet');
+    });
+
+    // --- Schedule ---
+    function getLastVisitedMap(){ const map = new Map(); for(const v of visitsAll){ map.set(v.teacher, v.date); } return map; }
+    async function generateSchedule(){
+      if(!teachers.length){ alert('Add teachers first'); return; }
+      const today = todayStr();
+      const lastMap = getLastVisitedMap();
+      const sorted = [...teachers].sort((a,b)=>{
+        const ad = lastMap.get(a.name) ? new Date(lastMap.get(a.name)).getTime() : 0;
+        const bd = lastMap.get(b.name) ? new Date(lastMap.get(b.name)).getTime() : 0;
+        return ad - bd; // least recently visited first
+      });
+      const chosen = [];
+      const periods = PERIODS.slice();
+      while(chosen.length < Math.min(5, sorted.length, periods.length)){
+        const t = sorted.shift(); if(!t) break; const p = periods.shift();
+        chosen.push({ id: crypto.randomUUID(), teacher: t.name, subject: t.subject, period: p.label, time: p.time, status:'scheduled' });
+      }
+      await setDoc(doc(db,'schedules', today), { date: today, items: chosen, updatedAt: serverTimestamp() });
     }
-    await setDoc(doc(db,'schedules', today), { date: today, items: chosen, updatedAt: serverTimestamp() });
-  }
-  async function clearSchedule(){ await setDoc(doc(db,'schedules', todayStr()), { date: todayStr(), items: [] }, { merge: true }); }
+    async function clearSchedule(){ await setDoc(doc(db,'schedules', todayStr()), { date: todayStr(), items: [] }, { merge: true }); }
 
-  function renderSchedule(){
-    const data = scheduleDoc && Array.isArray(scheduleDoc.items) ? scheduleDoc.items : [];
-    if(!data.length){
-      scheduleList.innerHTML = '<div class="p-4 text-slate-500 text-sm">No schedule yet. Click <b>Generate</b> to plan up to 5 visits for today.</div>';
-      return;
+    function renderSchedule(){
+      const data = scheduleDoc && Array.isArray(scheduleDoc.items) ? scheduleDoc.items : [];
+      if(!data.length){
+        scheduleList.innerHTML = '<div class="p-4 text-slate-500 text-sm">No schedule yet. Click <b>Generate</b> to plan up to 5 visits for today.</div>';
+        return;
+      }
+      const today = todayStr();
+      scheduleList.innerHTML = data.map(item=>{
+        const done = visitsToday.some(v=>v.date===today && v.teacher===item.teacher && v.status==='completed');
+        return `<div class="flex items-center justify-between p-2 border-b">
+          <div class="min-w-0">
+            <div class="text-sm font-medium">${item.period} • ${item.time.replace('-', ' - ')}</div>
+            <div class="text-xs text-slate-500 truncate">${escapeHtml(item.teacher)} — ${escapeHtml(item.subject||'')}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs px-2 py-0.5 rounded-full ${done? 'bg-emerald-50 text-emerald-700':'bg-violet-50 text-violet-700'}">${done?'Completed':'Scheduled'}</span>
+            <button class="px-2 py-1.5 text-xs rounded-md ${done?'border':'bg-emerald-600 text-white'}" ${done?'disabled':''} onclick="window._quickLog('${b64(item.teacher)}','${b64(item.subject||'')}','${item.time.split('-')[0]}')">${done?'Logged':'Quick Log'}</button>
+          </div>
+        </div>`;
+      }).join('');
     }
-    const today = todayStr();
-    scheduleList.innerHTML = data.map(item=>{
-      const done = visitsToday.some(v=>v.date===today && v.teacher===item.teacher && v.status==='completed');
-      return `<div class="flex items-center justify-between p-2 border-b">
-        <div class="min-w-0">
-          <div class="text-sm font-medium">${item.period} • ${item.time.replace('-', ' - ')}</div>
-          <div class="text-xs text-slate-500 truncate">${item.teacher} — ${item.subject||''}</div>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs px-2 py-0.5 rounded-full ${done? 'bg-emerald-50 text-emerald-700':'bg-violet-50 text-violet-700'}">${done?'Completed':'Scheduled'}</span>
-          <button class="px-2 py-1.5 text-xs rounded-md ${done?'border':'bg-emerald-600 text-white'}" ${done?'disabled':''} onclick="window._quickLog('${b64(item.teacher)}','${b64(item.subject||'')}','${item.time.split('-')[0]}')">${done?'Logged':'Quick Log'}</button>
-        </div>
-      </div>`;
-    }).join('');
-  }
 
-  // Visit logging
-  const starsEl = document.getElementById('stars');
-  starsEl.addEventListener('click', (e)=>{ const r = Number(e.target.dataset.r||0); if(!r) return; currentRating = r; paintStars(); });
-  function paintStars(){ [...starsEl.querySelectorAll('button')].forEach(btn=>{ const r = Number(btn.dataset.r); btn.textContent = (r<=currentRating?'★':'☆'); }); }
+    // --- Visit logging ---
+    const starsEl = document.getElementById('stars');
+    starsEl.addEventListener('click', (e)=>{ const r = Number(e.target.dataset.r||0); if(!r) return; currentRating = r; paintStars(); });
+    function paintStars(){ [...starsEl.querySelectorAll('button')].forEach(btn=>{ const r = Number(btn.dataset.r); btn.textContent = (r<=currentRating?'★':'☆'); }); }
 
-  window._quickLog = (encName, encSubj, startTime)=>{
-    const name = ub64(encName); const subj = ub64(encSubj);
-    $('visitTeacher').value = name; $('visitTime').value = startTime; $('visitNotes').focus();
-    $('logHint').textContent = `Pre-filled from schedule for ${name}.`;
-  };
+    window._quickLog = (encName, encSubj, startTime)=>{
+      const name = ub64(encName); const subj = ub64(encSubj);
+      $('visitTeacher').value = name; $('visitTime').value = startTime; $('visitNotes').focus();
+      $('logHint').textContent = `Pre-filled from schedule for ${name}.`;
+    };
 
-  $('logBtn').addEventListener('click', async ()=>{
-    const teacher = $('visitTeacher').value;
-    const time = $('visitTime').value;
-    const dur = Number($('visitDur').value||15);
-    const notes = $('visitNotes').value.trim();
-    if(!teacher){ return alert('Select a teacher'); }
-    if(!currentRating){ return alert('Click a rating'); }
-    await addDoc(collection(db,'visits'), { date: todayStr(), teacher, time, dur, notes, rating: currentRating, status:'completed', createdAt: serverTimestamp() });
-    currentRating = 0; paintStars(); $('visitNotes').value=''; $('logHint').textContent = 'Saved!'; setTimeout(()=>$('logHint').textContent='',1200);
-  });
+    $('logBtn').addEventListener('click', async ()=>{
+      const teacher = $('visitTeacher').value;
+      const time = $('visitTime').value;
+      const dur = Number($('visitDur').value||15);
+      const notes = $('visitNotes').value.trim();
+      if(!teacher){ return alert('Select a teacher'); }
+      if(!currentRating){ return alert('Click a rating'); }
+      await addDoc(collection(db,'visits'), { date: todayStr(), teacher, time, dur, notes, rating: currentRating, status:'completed', createdAt: serverTimestamp() });
+      currentRating = 0; paintStars(); $('visitNotes').value=''; $('logHint').textContent = 'Saved!'; setTimeout(()=>$('logHint').textContent='',1200);
+    });
 
-  function updateStats(){
-    const today = todayStr();
-    const avg = visitsAll.length ? (visitsAll.reduce((s,v)=>s+(v.rating||0),0)/visitsAll.length).toFixed(1) : '0.0';
-    statCompleted.textContent = visitsToday.filter(v=>v.status==='completed').length;
-    statScheduled.textContent = (scheduleDoc && scheduleDoc.items) ? scheduleDoc.items.length : 0;
-    statWeek.textContent = visitsWeek.length;
-    statAvg.textContent = avg;
-    statMissed.textContent = visitsToday.filter(v=>v.status==='missed').length;
-  }
+    function updateStats(){
+      const today = todayStr();
+      const avg = visitsAll.length ? (visitsAll.reduce((s,v)=>s+(v.rating||0),0)/visitsAll.length).toFixed(1) : '0.0';
+      statCompleted.textContent = visitsToday.filter(v=>v.status==='completed').length;
+      statScheduled.textContent = (scheduleDoc && scheduleDoc.items) ? scheduleDoc.items.length : 0;
+      statWeek.textContent = visitsWeek.length;
+      statAvg.textContent = avg;
+      statMissed.textContent = visitsToday.filter(v=>v.status==='missed').length;
+    }
 
-  // UI wiring
-  $('genScheduleBtn').addEventListener('click', generateSchedule);
-  $('clearScheduleBtn').addEventListener('click', clearSchedule);
-  $('search').addEventListener('input', render);
+    // --- UI wiring ---
+    $('genScheduleBtn').addEventListener('click', generateSchedule);
+    $('clearScheduleBtn').addEventListener('click', clearSchedule);
+    $('search').addEventListener('input', render);
 
-  // Add teacher form initializations
-  function initTime(){ const now=new Date(); const hh=String(now.getHours()).padStart(2,'0'); const mm=String(now.getMinutes()).padStart(2,'0'); const el=$('visitTime'); if(el) el.value=`${hh}:${mm}`; }
-  initTime(); render(); renderVisitTeacher();
+    // Time init
+    (function initTime(){ const now=new Date(); const hh=String(now.getHours()).padStart(2,'0'); const mm=String(now.getMinutes()).padStart(2,'0'); const el=$('visitTime'); if(el) el.value=`${hh}:${mm}`; })();
+    render(); renderVisitTeacher();
 
-  // After sign-in, bind snapshots
-  window.addEventListener('fb:signed-in', bindRealtime);
-</script>
+    function flashStatus(text, color='emerald'){
+      statusBadge.textContent = text;
+      statusBadge.className = `text-xs px-2 py-0.5 rounded-full bg-${color}-50 text-${color}-700`;
+      setTimeout(()=>{statusBadge.textContent='live';statusBadge.className='text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600'},1200);
+    }
+  </script>
 </body>
 </html>
